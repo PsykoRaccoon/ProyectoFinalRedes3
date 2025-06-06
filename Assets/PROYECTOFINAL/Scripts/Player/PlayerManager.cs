@@ -267,7 +267,7 @@ public class PlayerManager : NetworkBehaviour, IDamageable
 
             if (Physics.Raycast(origin, direction, out RaycastHit hit, activeWeapon.range))
             {
-                RpcPlayShootEffect(hit.point, hit.normal, muzzlePos);
+               // RpcPlayShootEffect(hit.point, hit.normal, muzzlePos);
             }
         }
         else
@@ -277,11 +277,11 @@ public class PlayerManager : NetworkBehaviour, IDamageable
             // Aún así mostramos efecto visual
             if (Physics.Raycast(origin, direction, out RaycastHit fallbackHit, activeWeapon.range))
             {
-                RpcPlayShootEffect(fallbackHit.point, fallbackHit.normal, muzzlePos);
+                //RpcPlayShootEffect(fallbackHit.point, fallbackHit.normal, muzzlePos);
             }
             else
             {
-                RpcPlayShootEffect(origin + direction * activeWeapon.range, -direction, muzzlePos);
+                //RpcPlayShootEffect(origin + direction * activeWeapon.range, -direction, muzzlePos);
             }
         }
         //NetworkIdentity targetIdentity;
@@ -404,11 +404,11 @@ public class PlayerManager : NetworkBehaviour, IDamageable
         scScript = GameObject.FindFirstObjectByType<SceneScript>();
          base.OnStartServer();
 
-    if (activeWeapon == null)
-    {
-        // Aquí deberías asignar correctamente la referencia del arma
-        activeWeapon = GetComponentInChildren<Weapon>();
-        Debug.Log($"[SERVER] {gameObject.name} asignó su arma en OnStartServer: {activeWeapon}");
+    if (activeWeapon == null && activeWeaponSync >= 0 && activeWeaponSync < weapons.Length)
+        {
+            // Aquí deberías asignar correctamente la referencia del arma
+            activeWeapon = weapons[activeWeaponSync].GetComponent<Weapon>();
+            Debug.Log($"[SERVER] {gameObject.name} asignó su arma en OnStartServer: {activeWeapon}");
     }
 
     }
@@ -673,8 +673,6 @@ public class PlayerManager : NetworkBehaviour, IDamageable
         //ShowHitEffects();
         //UpdateHealthUI(currentHealth);
         
-        
-        //ShowhitEffects();
     }
     public bool Heal(float amount)
     {
@@ -687,7 +685,8 @@ public class PlayerManager : NetworkBehaviour, IDamageable
         UpdateHealthUI(currentHealth);
         return true;
     }
-
+    #endregion 
+    #region Death
     void Die()
     {
         RpcPlayDeathEffect();

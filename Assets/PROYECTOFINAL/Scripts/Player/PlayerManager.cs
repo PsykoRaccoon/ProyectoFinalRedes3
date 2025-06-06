@@ -6,6 +6,7 @@ using static UnityEngine.UI.Image;
 using System;
 using Mirror.Examples.Common;
 using static UnityEngine.UIElements.UxmlAttributeDescription;
+using System.Collections;
 [RequireComponent(typeof(CharacterController))]
 public class PlayerManager : NetworkBehaviour, IDamageable
 {
@@ -14,7 +15,7 @@ public class PlayerManager : NetworkBehaviour, IDamageable
 
     [Header("Health Settings")]
     public float maxHealth;
-    private float currentHealth;
+    public float currentHealth;
     
 
     [Header("Weapon Settings")]
@@ -108,21 +109,25 @@ public class PlayerManager : NetworkBehaviour, IDamageable
 
         weapons[_new].SetActive(true);
 
-        
-        
+
+        if (!isLocalPlayer)
+            return;
+
 
         if (isLocalPlayer)
         {
+            if (bulletsLeftPerWeapon == null || bulletsLeftPerWeapon.Length <= _new)
+            {
+                Debug.LogError("bulletsLeftPerWeapon array is null or too short.");
+                Debug.LogWarning("bulletsLeftPerWeapon not initialized yet, skipping OnWeaponChanged for local player.");
+                return;
+            }
             activeWeapon = weapons[_new].GetComponent<Weapon>();
             if (activeWeapon == null)
             {
                 Debug.LogError("Weapon component not found on selected weapon.");
             }
-            if (bulletsLeftPerWeapon == null || bulletsLeftPerWeapon.Length <= _new)
-            {
-                Debug.LogError("bulletsLeftPerWeapon array is null or too short.");
-                return;
-            }
+           
 
             bulletsLeft = bulletsLeftPerWeapon[_new];
             UpdateAmmoUI(bulletsLeft);
@@ -156,35 +161,52 @@ public class PlayerManager : NetworkBehaviour, IDamageable
 
     void OnHealthChanged(int _old, int _new)
     {
-        canvasHealthText.text = healthSync.ToString();
-        txtHealthTag.text = healthSync.ToString();
+        Debug.Log("esta mamada que");
 
-        if (isLocalPlayer)
+        if (isLocalPlayer && canvasHealthText != null)
             UpdateHealthUI(_new);
+        //RpcUpdateHealth(_new);
+        if (txtHealthTag != null)
+        {
+            txtHealthTag.text = _new.ToString();
 
-        if (healthSync > 70)
-        {
-            txtHealthTag.color = Color.green;
+            Color color = Color.green;
+            if (_new <= 70 && _new > 35) color = Color.yellow;
+            else if (_new <= 35 && _new > 10) color = Color.red;
+            else if (_new <= 10) color = Color.black;
+
+            txtHealthTag.color = color;
         }
-        else if (healthSync > 35)
-        {
-            txtHealthTag.color = Color.yellow;
-        }
-        else if (healthSync > 10)
-        {
-            txtHealthTag.color = Color.red;
-        }
-        else if (healthSync <= 0)
+        if (_new <= 0 && isLocalPlayer)
         {
             Debug.LogError("You're dead...");
         }
+
+        Debug.Log($"OnHealthChanged fired: {_old} -> {_new}");
+
+
+        //Debug.Log($"OnHealthChanged fired: {_old} -> {_new}");
+        //canvasHealthText.text = _new.ToString();
+        //txtHealthTag.text = _new.ToString();
+
     }
 
 
     #endregion
 
     #region Funciones de red
+    [ClientRpc]
+    void RpcUpdateHealth(int _new)
+    {
+        if (!isLocalPlayer) return;
+        Debug.Log($"[CLIENT] Vida actualizada: {_new}");
+        UpdateHealthUI(_new);
+        //if (canvasHealthText != null)
+        //    canvasHealthText.text = _new.ToString();
 
+        //if (txtHealthTag != null)
+        //    txtHealthTag.text = _new.ToString();
+    }
     [Command]
     public void CmdSetupPlayer(string newName, Color newColor)
     {
@@ -202,7 +224,7 @@ public class PlayerManager : NetworkBehaviour, IDamageable
     [Command]
     public void CmdChangeActiveWeapon(int newIndex)
     {
-        Debug.Log($"Changing weapon to index {newIndex}, total weapons: {weapons.Length}");
+        //Debug.Log($"Changing weapon to index {newIndex}, total weapons: {weapons.Length}");
         activeWeaponSync = newIndex;
     }
     [Command]
@@ -211,45 +233,112 @@ public class PlayerManager : NetworkBehaviour, IDamageable
         healthSync = _health;
     }
     [Command]
-    public void CmdShootRay(GameObject target, Vector3 origin, Vector3 direction, Vector3 muzzlePos)
+    public void CmdShootRay(uint targetNetId, Vector3 origin, Vector3 direction, Vector3 muzzlePos)
     {
-        if (target == null) return;
-
-        IDamageable damageable = target.GetComponent<IDamageable>();
-        if (damageable != null)
+        if (activeWeapon == null)
         {
-            damageable.ApplyDamage(activeWeapon.damageToEnemy);
+            Debug.LogWarning("[SERVER] activeWeapon es null en CmdShootRay");
+            return;
         }
-        if (Physics.Raycast(origin, direction, out RaycastHit hit, activeWeapon.range))
+        if (targetNetId == 0)
         {
-            RpcPlayShootEffect(hit.point, hit.normal, muzzlePos);
-        }
-        //RpcFireWeaponEffects(origin, direction);
+            Debug.Log($"[SERVER] Disparo al vacío. Hay {NetworkServer.spawned.Count} objetos en escena.");
 
-        //if (Physics.Raycast(origin, direction, out RaycastHit hit, activeWeapon.range))
+            if (Physics.Raycast(origin, direction, out RaycastHit missHit, activeWeapon.range))
+            {
+                RpcPlayShootEffect(missHit.point, missHit.normal, muzzlePos);
+            }
+            else
+            {
+                // Si ni siquiera golpea algo (por ejemplo, espacio vacío), aún puedes mostrar el flash del arma
+                RpcPlayShootEffect(origin + direction * activeWeapon.range, -direction, muzzlePos);
+            }
+            return;
+        }
+        if (NetworkServer.spawned.TryGetValue(targetNetId, out NetworkIdentity targetIdentity))
+        {
+            IDamageable damageable = targetIdentity.GetComponentInParent<IDamageable>();
+            Debug.Log($"[SERVER] Encontrado targetNetId={targetNetId}, damageable={damageable}");
+
+            if (damageable != null)
+            {
+                damageable.ApplyDamage(activeWeapon.damageToEnemy);
+            }
+
+            if (Physics.Raycast(origin, direction, out RaycastHit hit, activeWeapon.range))
+            {
+                RpcPlayShootEffect(hit.point, hit.normal, muzzlePos);
+            }
+        }
+        else
+        {
+            Debug.LogWarning($"[SERVER] No se encontró el objeto con netId {targetNetId} en NetworkServer.spawned");
+
+            // Aún así mostramos efecto visual
+            if (Physics.Raycast(origin, direction, out RaycastHit fallbackHit, activeWeapon.range))
+            {
+                RpcPlayShootEffect(fallbackHit.point, fallbackHit.normal, muzzlePos);
+            }
+            else
+            {
+                RpcPlayShootEffect(origin + direction * activeWeapon.range, -direction, muzzlePos);
+            }
+        }
+        //NetworkIdentity targetIdentity;
+        //if (NetworkServer.spawned.TryGetValue(targetNetId, out targetIdentity))
         //{
-        //    if (hit.collider.gameObject == target)
+        //    IDamageable damageable = targetIdentity.GetComponentInParent<IDamageable>();
+        //    Debug.Log("Damageable gotten: " + damageable);
+        //    if (damageable != null)
         //    {
-        //        IDamageable damageable = target.GetComponent<IDamageable>();
-        //        if (damageable != null)
-        //        {
-        //            damageable.ApplyDamage(activeWeapon.damageToEnemy);
-        //        }
+        //        damageable.ApplyDamage(activeWeapon.damageToEnemy);
+        //    }
+
+        //    if (Physics.Raycast(origin, direction, out RaycastHit hit, activeWeapon.range))
+        //    {
+        //        RpcPlayShootEffect(hit.point, hit.normal, muzzlePos);
         //    }
         //}
-        //RcpFireWeapon(target, origin, direction);
+        //else
+        //{
+        //    Debug.LogWarning($"[SERVER] No se encontró el objeto con netId {targetNetId}");
+        //}
+        //IDamageable damageable = target.GetComponentInParent<IDamageable>();
+        //Debug.Log("Damageable gotten " + damageable);
+        //Debug.Log($"[SERVER] Raycast hit: {target.name}, damageable: {target.GetComponent<IDamageable>() != null}");
+
+        //if (damageable != null)
+        //{
+        //    damageable.ApplyDamage(activeWeapon.damageToEnemy);
+        //}
+        //if (Physics.Raycast(origin, direction, out RaycastHit hit, activeWeapon.range))
+        //{
+        //    RpcPlayShootEffect(hit.point, hit.normal, muzzlePos);
+        //}
+
     }
    
 
     [ClientRpc]
     void RpcPlayShootEffect(Vector3 hitPoint, Vector3 hitNormal, Vector3 muzzlePos)
     {
-        // Solo instanciamos efectos visuales
+        if (bulletHole == null)
+        {
+            Debug.LogWarning("[CLIENT] bulletHole es null en RpcPlayShootEffect");
+            return;
+        }
+
         if (bulletHole != null)
         {
             GameObject impact = Instantiate(bulletHole, hitPoint, Quaternion.LookRotation(hitNormal));
             Instantiate(muzzleFlash, activeWeapon.firePos.position, Quaternion.identity);
             Destroy(impact, 2f);
+        }
+
+        if (muzzleFlash == null)
+        {
+            Debug.LogWarning("[CLIENT] muzzleFlash es null en RpcPlayShootEffect");
+            return;
         }
         if (muzzleFlash != null)
         {
@@ -262,23 +351,6 @@ public class PlayerManager : NetworkBehaviour, IDamageable
         }
     }
 
-    //[ClientRpc]
-    //void RpcFireWeaponEffects( Vector3 origin, Vector3 direction)
-    //{
-
-    //    if (!isLocalPlayer)
-    //    {
-    //        if (activeWeapon != null && muzzleFlash != null && activeWeapon.firePos != null)
-    //        {
-    //            Instantiate(muzzleFlash, activeWeapon.firePos.position, Quaternion.identity);
-    //            audioSource.PlayOneShot(shootSound);
-    //        }
-    //    }
-    //    //GameObject bullet = Instantiate(activeWeapon.bullet, activeWeapon.firePos.position, activeWeapon.firePos.rotation);
-    //    //bullet.GetComponent<Rigidbody>().linearVelocity = bullet.transform.forward * activeWeapon.speed;
-    //    //Destroy(bullet, activeWeapon.life);
-
-    //}
 
 
     private void Awake()
@@ -315,24 +387,30 @@ public class PlayerManager : NetworkBehaviour, IDamageable
             DisableRemoteVisuals();
         }
 
+        //// 🔧 Fuerza actualización de UI remota
+        //OnNameChange("", playerName);
+        //OnColorChange(Color.black, playerColor);
+        ////OnHealthChanged(0, healthSync);
+        ////OnWeaponChanged(-1, activeWeaponSync);
     }
-    private void DisableRemoteVisuals()
-    {
-        if (cam != null)
-            cam.gameObject.SetActive(false);
-
-        if (canvasAmmoText != null)
-            canvasAmmoText.transform.parent.gameObject.SetActive(false);
-
-        foreach (GameObject weapon in weapons)
-        {
-            weapon.SetActive(false);
-        }
-    }
+   
     public override void OnStartServer()
     {
         name = $"Player[{netId}|server]";
         Debug.Log("OnStartServer: " + name);
+
+        currentHealth = maxHealth;
+        healthSync = (int)currentHealth;
+        scScript = GameObject.FindFirstObjectByType<SceneScript>();
+         base.OnStartServer();
+
+    if (activeWeapon == null)
+    {
+        // Aquí deberías asignar correctamente la referencia del arma
+        activeWeapon = GetComponentInChildren<Weapon>();
+        Debug.Log($"[SERVER] {gameObject.name} asignó su arma en OnStartServer: {activeWeapon}");
+    }
+
     }
 
     public override void OnStartLocalPlayer()
@@ -354,6 +432,11 @@ public class PlayerManager : NetworkBehaviour, IDamageable
         Cursor.visible = false;
 
         currentHealth = maxHealth;
+        healthSync = (int)maxHealth;
+
+        UpdateHealthUI((int)currentHealth);
+        txtHealthTag.text = ((int)currentHealth).ToString();
+
         readyToShoot = true;
 
         string _name = "player_" + UnityEngine.Random.Range(100, 999);
@@ -366,15 +449,15 @@ public class PlayerManager : NetworkBehaviour, IDamageable
         {
             weapon.SetActive(false);
         }
-        if (isLocalPlayer)
+        //if (isLocalPlayer)
+        //{
+        bulletsLeftPerWeapon = new float[weapons.Length];
+        for (int i = 0; i < weapons.Length; i++)
         {
-            bulletsLeftPerWeapon = new float[weapons.Length];
-            for (int i = 0; i < weapons.Length; i++)
-            {
-                Weapon w = weapons[i].GetComponent<Weapon>();
-                bulletsLeftPerWeapon[i] = w.magSize;
-            }
+            Weapon w = weapons[i].GetComponent<Weapon>();
+            bulletsLeftPerWeapon[i] = w.magSize;
         }
+        //}
 
         selectedWeaponLocal = 0;
         activeWeaponSync = selectedWeaponLocal;
@@ -395,7 +478,19 @@ public class PlayerManager : NetworkBehaviour, IDamageable
             Debug.LogError("activeWeapon es null en OnStartLocalPlayer");
         }
     }
-    
+     private void DisableRemoteVisuals()
+    {
+        if (cam != null)
+            cam.gameObject.SetActive(false);
+
+        if (canvasAmmoText != null)
+            canvasAmmoText.transform.parent.gameObject.SetActive(false);
+
+        foreach (GameObject weapon in weapons)
+        {
+            weapon.SetActive(false);
+        }
+    }
     #endregion
 
     #region Funciones locales
@@ -442,6 +537,244 @@ public class PlayerManager : NetworkBehaviour, IDamageable
         HandleLook();
         
     }
+    private void LateUpdate()
+    {
+        if (floating != null && cam != null)
+            floating.transform.LookAt(cam.transform);
+    }
+
+    #region DISPARO
+    private void SetActiveWeapon(int index)
+    {
+        for (int i = 0; i<weapons.Length; i++)
+        {
+            weapons[i].SetActive(i == index);
+        }
+
+        activeWeapon = weapons[index].GetComponent<Weapon>();
+        selectedWeaponLocal = index;
+        bulletsLeft = bulletsLeftPerWeapon[index];
+
+        if (isLocalPlayer)
+        {
+            UpdateAmmoUI(bulletsLeft);
+        }
+    }
+    private void Shoot()
+    {
+        if (!isLocalPlayer) return;
+
+        float x = UnityEngine.Random.Range(-activeWeapon.spread, activeWeapon.spread);
+        float y = UnityEngine.Random.Range(-activeWeapon.spread, activeWeapon.spread);
+
+
+        readyToShoot = false;
+        Vector3 muzzlePos = activeWeapon.firePos.position;
+        audioSource.PlayOneShot(shootSound);
+
+        Vector3 rayOrigin = cam.transform.position;
+        Vector3 rayDirection = cam.transform.forward + new Vector3(x, y, 0);
+
+        if (Physics.Raycast(rayOrigin, rayDirection, out RaycastHit rayHit, activeWeapon.range))
+        {
+            Debug.DrawRay(rayOrigin, rayDirection * rayHit.distance, Color.green, 1f);
+
+            NetworkIdentity targetIdentity = rayHit.transform.GetComponentInParent<NetworkIdentity>();
+            uint targetNetId = targetIdentity != null ? targetIdentity.netId : 0;
+
+            CmdShootRay(targetNetId, rayOrigin, rayDirection, muzzlePos);
+            //if (ni != null)
+            //{
+            //    CmdShootRay(ni.netId, rayOrigin, rayDirection, muzzlePos);
+            //}
+            //Debug.Log("Oyeme, esto ocurre? " + rayHit.collider.gameObject.name);
+            //CmdShootRay(rayHit.collider.gameObject, rayOrigin, rayDirection, muzzlePos);
+
+            //Quaternion hitRotation = Quaternion.LookRotation(rayHit.normal);
+            //GameObject hole = Instantiate(bulletHole, rayHit.point, hitRotation);
+            //AudioSource.PlayClipAtPoint(hitSound, rayHit.point);
+            //Destroy(hole, 10f);
+
+        }
+        else
+        {
+            Debug.DrawLine(rayOrigin, rayDirection * activeWeapon.range, Color.red, 1f);
+            //Vector3 fallbackHit = cam.transform.position + cam.transform.forward * activeWeapon.range;
+            CmdShootRay(0,rayOrigin, rayDirection, muzzlePos);
+        }
+
+       //Instantiate(muzzleFlash, activeWeapon.firePos.position, Quaternion.identity);
+
+        //bulletsLeftPerWeapon[selectedWeaponLocal] = bulletsLeft;
+
+        bulletsShot--;
+
+        if (isLocalPlayer)
+        {
+            UpdateAmmoUI(bulletsLeft);
+        }
+        Invoke("ResetShot", activeWeapon.timeBetweenEachShot);
+
+        if (bulletsShot > 0 && bulletsLeft > 0)
+        {
+            Invoke("Shoot", activeWeapon.timeBetweenEachBullet);
+        }
+    }
+    private void ResetShot()
+    {
+        readyToShoot = true;
+    }
+    #region RELOAD
+    private void Reload()
+    {
+        reloading = true;
+        audioSource.PlayOneShot(reloadSound);
+        Invoke("ReloadFinished", activeWeapon.reloadTime);
+    }
+
+    private void ReloadFinished()
+    {
+        bulletsLeft = activeWeapon.magSize;
+        bulletsLeftPerWeapon[selectedWeaponLocal] = bulletsLeft;
+        reloading = false;
+
+
+        if (isLocalPlayer)
+        {
+            UpdateAmmoUI(bulletsLeft);
+        }
+    }
+    #endregion
+    #endregion
+
+    #region VIDA
+
+    public void ApplyDamage(float amount)
+    {
+        if (!isServer) return;
+    
+        currentHealth -= amount;
+        currentHealth = Mathf.Clamp(currentHealth, 0, maxHealth);
+
+        healthSync = (int)currentHealth;
+        if (currentHealth <= 0)
+        {
+            currentHealth = 0;
+            //CmdUpdateHealth((int)currentHealth);
+            Die();
+        }
+        //healthSync = (int)currentHealth;
+
+
+        //CmdUpdateHealth((int)currentHealth);
+       
+        Debug.Log($"[SERVER] {playerName} recibió daño. Vida: {currentHealth}");
+        RpcUpdateHealth((int)currentHealth);
+        //ShowHitEffects();
+        //UpdateHealthUI(currentHealth);
+        
+        
+        //ShowhitEffects();
+    }
+    public bool Heal(float amount)
+    {
+        if (currentHealth >= maxHealth)
+            return false;
+
+
+        currentHealth += amount;
+        currentHealth = Mathf.Min(currentHealth, maxHealth);
+        UpdateHealthUI(currentHealth);
+        return true;
+    }
+
+    void Die()
+    {
+        RpcPlayDeathEffect();
+        print("Morido");
+        //LOGICA RESPAWN
+        RpcHandleDeath();
+        StartCoroutine(RespawnRoutine());
+    }
+    [Server]
+    private IEnumerator RespawnRoutine()
+    {
+        yield return new WaitForSeconds(1f); // Tiempo de espera antes del respawn
+
+        Vector3 spawnPos = NetworkManager.singleton.GetStartPosition().position;
+        transform.position = spawnPos;
+        controller.enabled = false; // desactivar para poder mover el transform
+        transform.position = spawnPos;
+        controller.enabled = true;
+
+        currentHealth = maxHealth;
+        healthSync = (int)maxHealth;
+        capsula.SetActive(true);
+
+        RpcHandleRespawn(spawnPos);
+    }
+    [ClientRpc]
+    void RpcHandleDeath()
+    {
+        if (isLocalPlayer)
+        {
+            Debug.Log("¡Has muerto!");
+            // Aquí puedes desactivar el control del jugador, mostrar una pantalla de muerte, etc.
+            controller.enabled = false;
+            cam.gameObject.SetActive(false);
+            enabled = false;
+        }
+        // Desactiva el render del cuerpo o muestra un efecto de muerte
+        capsula.SetActive(false);
+    }
+    [ClientRpc]
+    void RpcHandleRespawn(Vector3 spawnPosition)
+    {
+        if (isLocalPlayer)
+        {
+            Debug.Log("¡Has respawneado!");
+            controller.enabled = false;
+            transform.position = spawnPosition;
+            controller.enabled = true;
+            cam.gameObject.SetActive(true);
+            enabled = true;
+        }
+
+        capsula.SetActive(true);
+    }
+    [ClientRpc]
+    void RpcPlayDeathEffect()
+    {
+        //if (deathEffect != null)
+          //  Instantiate(deathEffect, transform.position, Quaternion.identity);
+    }
+
+    void ShowHitEffects()
+    {
+        // Aquí puedes poner sonido, pantalla roja, etc.
+        if (isLocalPlayer)
+        {
+            Debug.Log("Recibiste daño");
+        }
+    }
+    #endregion
+
+    #region UI
+    public void UpdateAmmoUI (float ammo)
+    {
+        if (!isLocalPlayer) return;
+        canvasAmmoText.text = ammo.ToString() + "/" + activeWeapon.magSize;
+    }
+    void UpdateHealthUI(float health)
+    {
+        if (!isLocalPlayer) return;
+        if (canvasHealthText != null)
+        {
+            canvasHealthText.text = $"Health: {health}/{maxHealth}";
+        }
+    }
+    #endregion
+
     #region Movimiento
     private void MyInput()
     {
@@ -545,6 +878,9 @@ public class PlayerManager : NetworkBehaviour, IDamageable
             velocity.y = Mathf.Sqrt(jumpHeight * -2f * gravity);
         }
     }
+    
+    #endregion
+
     #region Cámara
  
     void HandleViewToggle()
@@ -579,157 +915,5 @@ public class PlayerManager : NetworkBehaviour, IDamageable
     }
     #endregion
 
-    #region DISPARO
-    private void SetActiveWeapon(int index)
-    {
-        for (int i = 0; i<weapons.Length; i++)
-        {
-            weapons[i].SetActive(i == index);
-        }
-
-        activeWeapon = weapons[index].GetComponent<Weapon>();
-        selectedWeaponLocal = index;
-        bulletsLeft = bulletsLeftPerWeapon[index];
-
-        if (isLocalPlayer)
-        {
-            UpdateAmmoUI(bulletsLeft);
-        }
-    }
-    private void Shoot()
-    {
-        if (!isLocalPlayer) return;
-
-        float x = UnityEngine.Random.Range(-activeWeapon.spread, activeWeapon.spread);
-        float y = UnityEngine.Random.Range(-activeWeapon.spread, activeWeapon.spread);
-
-
-        readyToShoot = false;
-        Vector3 muzzlePos = activeWeapon.firePos.position;
-        audioSource.PlayOneShot(shootSound);
-
-        Vector3 rayOrigin = activeWeapon.firePos.position;
-        Vector3 rayDirection = cam.transform.forward + new Vector3(x, y, 0);
-
-        if (Physics.Raycast(rayOrigin, rayDirection, out RaycastHit rayHit, activeWeapon.range))
-        {
-            Debug.DrawRay(rayOrigin, rayDirection * rayHit.distance, Color.green, 1f);
-            if(rayHit.collider.TryGetComponent<NetworkIdentity>(out NetworkIdentity netID))
-            {
-                CmdShootRay(rayHit.collider.gameObject, rayOrigin, rayDirection, muzzlePos);
-                
-            }
-
-
-            //Quaternion hitRotation = Quaternion.LookRotation(rayHit.normal);
-            //GameObject hole = Instantiate(bulletHole, rayHit.point, hitRotation);
-            //AudioSource.PlayClipAtPoint(hitSound, rayHit.point);
-            //Destroy(hole, 10f);
-
-        }
-        else
-        {
-            Debug.DrawLine(rayOrigin, rayDirection * activeWeapon.range, Color.red, 1f);
-            Vector3 fallbackHit = cam.transform.position + cam.transform.forward * activeWeapon.range;
-            CmdShootRay(null, cam.transform.position, cam.transform.forward, muzzlePos);
-        }
-
-       //Instantiate(muzzleFlash, activeWeapon.firePos.position, Quaternion.identity);
-
-        //bulletsLeftPerWeapon[selectedWeaponLocal] = bulletsLeft;
-
-        bulletsShot--;
-
-        if (isLocalPlayer)
-        {
-            UpdateAmmoUI(bulletsLeft);
-        }
-        Invoke("ResetShot", activeWeapon.timeBetweenEachShot);
-
-        if (bulletsShot > 0 && bulletsLeft > 0)
-        {
-            Invoke("Shoot", activeWeapon.timeBetweenEachBullet);
-        }
-    }
-    private void ResetShot()
-    {
-        readyToShoot = true;
-    }
-    #region RELOAD
-    private void Reload()
-    {
-        reloading = true;
-        audioSource.PlayOneShot(reloadSound);
-        Invoke("ReloadFinished", activeWeapon.reloadTime);
-    }
-
-    private void ReloadFinished()
-    {
-        bulletsLeft = activeWeapon.magSize;
-        bulletsLeftPerWeapon[selectedWeaponLocal] = bulletsLeft;
-        reloading = false;
-
-
-        if (isLocalPlayer)
-        {
-            UpdateAmmoUI(bulletsLeft);
-        }
-    }
-    #endregion
-    #endregion
-    #endregion
-
-    #region VIDA
-
-    public void ApplyDamage(float amount)
-    {
-        if (!isServer) return;
-        TakeDamage(amount);
-        
-    }
-    public void TakeDamage(float amount)
-    {
-        currentHealth -= amount;
-        UpdateHealthUI(currentHealth);
-        if (currentHealth <= 0)
-        {
-            Die();
-        }
-    }
-    public bool Heal(float amount)
-    {
-        if (currentHealth >= maxHealth)
-            return false;
-
-
-        currentHealth += amount;
-        currentHealth = Mathf.Min(currentHealth, maxHealth);
-        UpdateHealthUI(currentHealth);
-        return true;
-    }
-
-    void Die()
-    {
-        print("Morido");
-        //LOGICA RESPAWN
-        gameObject.SetActive(false);
-    }
-    #endregion
-
-    #region UI
-    public void UpdateAmmoUI (float ammo)
-    {
-        if (!isLocalPlayer) return;
-        canvasAmmoText.text = ammo.ToString() + "/" + activeWeapon.magSize;
-    }
-    void UpdateHealthUI(float health)
-    {
-        if (!isLocalPlayer) return;
-        if (canvasHealthText != null)
-        {
-            canvasHealthText.text = $"Health: {health}/{maxHealth}";
-        }
-    }
-    #endregion
     #endregion
 }

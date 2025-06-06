@@ -341,7 +341,7 @@ MonoBehaviour:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 2664698603509012800}
-  m_Enabled: 0
+  m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 9f777d22b38ef4341a21c97c70fe9bfa, type: 3}
   m_Name: 
@@ -365,7 +365,7 @@ MonoBehaviour:
   magSize: 10
   bulletsPerShot: 1
   timeBetweenEachShot: 0.05
-  spread: 0.5
+  spread: 0
   range: 20
   reloadTime: 1
   timeBetweenEachBullet: 0.05
@@ -914,7 +914,7 @@ Camera:
   m_Depth: 0
   m_CullingMask:
     serializedVersion: 2
-    m_Bits: 191
+    m_Bits: 4294967295
   m_RenderingPath: -1
   m_TargetTexture: {fileID: 0}
   m_TargetDisplay: 0
@@ -1056,13 +1056,11 @@ MonoBehaviour:
   syncMode: 0
   syncInterval: 0
   maxHealth: 100
+  currentHealth: 0
   weapons:
   - {fileID: 2664698603509012800}
   - {fileID: 9081188176528894132}
   cam: {fileID: 2376715999114930830}
-  camerasWithGuns: []
-  localWeapons: []
-  remoteWeapons: []
   speed: 8
   jumpHeight: 1.5
   gravity: -20
@@ -1608,6 +1606,7 @@ GameObject:
   - component: {fileID: 8159972046241787660}
   - component: {fileID: 2603322314223398117}
   - component: {fileID: 1029066903076886446}
+  - component: {fileID: 3184024274094559221}
   m_Layer: 0
   m_Name: Capsule
   m_TagString: Untagged
@@ -1682,6 +1681,29 @@ MeshRenderer:
   m_SortingLayer: 0
   m_SortingOrder: 0
   m_AdditionalVertexStreams: {fileID: 0}
+--- !u!136 &3184024274094559221
+CapsuleCollider:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7336088060343013985}
+  m_Material: {fileID: 0}
+  m_IncludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ExcludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_LayerOverridePriority: 0
+  m_IsTrigger: 0
+  m_ProvidesContacts: 0
+  m_Enabled: 1
+  serializedVersion: 2
+  m_Radius: 0.5
+  m_Height: 2
+  m_Direction: 1
+  m_Center: {x: 0, y: 0, z: 0}
 --- !u!1 &7695191125650713919
 GameObject:
   m_ObjectHideFlags: 0
@@ -1806,7 +1828,7 @@ MonoBehaviour:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 9081188176528894132}
-  m_Enabled: 0
+  m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 9f777d22b38ef4341a21c97c70fe9bfa, type: 3}
   m_Name: 
@@ -1825,12 +1847,12 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   speed: 15
-  damageToEnemy: 3
+  damageToEnemy: 100
   cooldown: 1.5
   magSize: 21
   bulletsPerShot: 3
   timeBetweenEachShot: 0.05
-  spread: 1
+  spread: 0.2
   range: 20
   reloadTime: 1.5
   timeBetweenEachBullet: 0.05
